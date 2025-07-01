@@ -1,101 +1,92 @@
-#include <iostream>
-#include <fstream>
-#include <thread>
-#include <chrono>
-#include "serial_utils.h"
-#include "parser.h"
+#include <iostream> 
+#include <fstream>  
+#include <string>   
+#include <vector>   
+#include <chrono>   
+#include <random>   
+#include <iomanip>  
+#include <thread>   
 
-// Alert functions (you can customize thresholds)
-void alertRPM(int rpm) {
-    if (rpm > 6000) {
-        std::cout << "[ALERT] High RPM detected: " << rpm << std::endl;
-    }
-}
 
-void alertSpeed(int speed) {
-    if (speed > 120) {
-        std::cout << "[ALERT] Speed limit exceeded: " << speed << " km/h" << std::endl;
-    }
-}
+void writeCsvHeader(std::ofstream& outputFile);
+// Writes a data row to the CSV file.
+void writeCsvData(std::ofstream& outputFile, long long timestamp, double speed, double rpm, double fuelLevel, double engineTemp);
 
 int main() {
-    //std::string port = "COM1"; // Adjust this to your actual port
-    bool elmConnected = false;
+    
+    // This file will contain dummy data, simulating the output from an OBD-II system.
+    const std::string filename = "obd_dummy_data.csv";
+    // Create an output file stream object.
+    std::ofstream outputFile(filename);
 
-    std::cout << "Attempting to connect to ELM327 on port " << port << "...\n";
-
-    elmConnected = openSerialPort(port);
-    if (!elmConnected) {
-        std::cout << "⚠️ Could not open port " << port << ". Falling back to log file mode.\n";
-    } else {
-        // Give the device a moment
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-        // Send reset command and read response
-        sendCommand("ATZ");
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        std::string resp = readResponse();
-
-        if (resp.find("ELM327") == std::string::npos) {
-            std::cout << "⚠️ Connected device is not ELM327. Falling back to log file mode.\n";
-            closeSerialPort();
-            elmConnected = false;
-        }
+    // Check if the file was opened successfully.
+    if (!outputFile.is_open()) {
+        std::cerr << "Error: Could not open file " << filename << " for writing." << std::endl;
+        return 1; // Indicate an error.
     }
 
-    if (elmConnected) {
-        std::cout << "✅ ELM327 connected successfully on " << port << "\n";
+    
+    std::mt19937 rng(std::chrono::high_resolution_clock::now().time_since_epoch().count());
 
-        sendCommand("ATE0"); // Echo off
-        sendCommand("ATL0"); // Linefeeds off
-        sendCommand("ATS0"); // Spaces off
+    // Define distributions for generating random values within plausible ranges.
+    std::uniform_real_distribution<> dist_speed(0.0, 120.0); // Speed in km/h (0 to 120)
+    std::uniform_real_distribution<> dist_rpm(600.0, 5500.0); // RPM (600 to 5500)
+    std::uniform_real_distribution<> dist_fuel(5.0, 95.0); // Fuel level in % (5% to 95%)
+    std::uniform_real_distribution<> dist_temp(80.0, 100.0); // Engine temperature in Celsius (80 to 100)
 
-        while (true) {
-            sendCommand("010C");  // Request RPM
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            std::string rpmResp = readResponse();
-            int rpm = parseRPM(rpmResp);
-            std::cout << "RPM: " << rpm << std::endl;
-            alertRPM(rpm);
+    
+    writeCsvHeader(outputFile);
 
-            sendCommand("010D");  // Request Speed
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            std::string speedResp = readResponse();
-            int speed = parseSpeed(speedResp);
-            std::cout << "Speed: " << speed << " km/h\n";
-            alertSpeed(speed);
+    // Simulate data acquisition for a certain number of iterations.
+    const int numReadings = 200; // Generate 200 data points for analysis.
+    std::cout << "Generating " << numReadings << " dummy data readings and saving to CSV..." << std::endl;
 
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+    for (int i = 0; i < numReadings; ++i) {
+        // Get the current timestamp (in milliseconds since epoch).
+        long long timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+
+        // Generate simulated sensor values using the defined distributions.
+        double speed = dist_speed(rng);
+        double rpm = dist_rpm(rng);
+        double fuelLevel = dist_fuel(rng);
+        double engineTemp = dist_temp(rng);
+
+        // Write the simulated data to the CSV file.
+        writeCsvData(outputFile, timestamp, speed, rpm, fuelLevel, engineTemp);
+
+        // Print progress to console every 20 readings.
+        if ((i + 1) % 20 == 0) {
+            std::cout << "  " << (i + 1) << " readings written." << std::endl;
         }
 
-        closeSerialPort();
-
-    } else {
-        std::cout << "⚠️  Running in log file mode...\n";
-
-        std::ifstream logFile("obd_log.txt");
-        if (!logFile.is_open()) {
-            std::cerr << "❌ Error: Could not open obd_log.txt\n";
-            return 1;
-        }
-
-        std::string line;
-        while (std::getline(logFile, line)) {
-            if (line.find("41 0C") != std::string::npos) {
-                int rpm = parseRPM(line);
-                std::cout << "[LOG] RPM: " << rpm << std::endl;
-                alertRPM(rpm);
-            } else if (line.find("41 0D") != std::string::npos) {
-                int speed = parseSpeed(line);
-                std::cout << "[LOG] Speed: " << speed << " km/h" << std::endl;
-                alertSpeed(speed);
-            }
-
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
-
-        logFile.close();
+        // Simulate a small delay between readings to mimic real-time acquisition.
+        std::this_thread::sleep_for(std::chrono::milliseconds(50)); // 50 milliseconds delay
     }
 
-    return 0;
+    // Close the output file.
+    outputFile.close();
+    std::cout << "Dummy data generation complete. Data saved to " << filename << std::endl;
+
+    return 0; // Indicate successful execution.
+}
+
+/**
+ * @brief Writes the header row to the CSV file.
+ * @param outputFile The output file stream.
+ */
+void writeCsvHeader(std::ofstream& outputFile) {
+    outputFile << "Timestamp_ms,Speed_kmh,RPM,Fuel_Percent,Engine_Temp_C\n";
+}
+
+
+void writeCsvData(std::ofstream& outputFile, long long timestamp, double speed, double rpm, double fuelLevel, double engineTemp) {
+    // Use std::fixed and std::setprecision to format floating-point numbers
+    // for consistent output in the CSV file.
+    outputFile << timestamp << ","
+               << std::fixed << std::setprecision(2) << speed << ","
+               << std::fixed << std::setprecision(0) << rpm << "," // RPM typically displayed as integer
+               << std::fixed << std::setprecision(1) << fuelLevel << ","
+               << std::fixed << std::setprecision(1) << engineTemp << "\n";
 }
